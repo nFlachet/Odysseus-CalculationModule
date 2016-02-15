@@ -39,7 +39,10 @@ class claculKpiSerializer(object):
         self.data = {}
 
     def add_kpiName(self, numKpi):
-        self.data['kpi_name'] = 'KPI-' + str(numKpi)
+        self.data['kpi_name'] = 'KPI-' + numKpi
+        _kpiNameUnitMap = [ "kWh","kWh","-","kWh/m2","kWh/habitants","kWh/m2.habitants","kWh",
+                            "kWh/m2","-","-","t","t/m2","h","euros"]
+        self.data['kpi_unit'] = _kpiNameUnitMap[int(numKpi)]
 
     def add_data(self, key, val):
         self.data[key] = str(val)

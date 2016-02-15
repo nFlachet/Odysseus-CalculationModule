@@ -183,6 +183,8 @@ class KpiHandlers:
         # client = Client(service_url, transport=transport)
         # print client
 
+        self._sensors = []
+
         url = "https://hamster.tno.nl/SemanticServerDataProxy/endpoints/SelectStaticGatewaysMsgService.wsdl"
         client = Client(url, location="https://hamster.tno.nl/SemanticServerDataProxy/endpoints")
 
@@ -284,6 +286,70 @@ class KpiHandlers:
             print client.last_sent()
             print e
 
+    def _getMultipleSensorsValues(self, reqType, operation):
+        """ get sensors values.
+        Take into account scope, tenant, sensor_id (sensors list), start & end time,
+        and time scope (group period) for this kpi :
+            000 = none
+            001 = day
+            002 = month
+            003 = year
+
+        Parameters, sensor_id: sensor unique id from witch to get value
+
+        reqType :
+            001 = all values
+            002 = average
+            003 = sum
+
+        operation : Algebric operation from 'ops' to do with previous sensors data available
+        """
+
+        url = 'https://hamster.tno.nl/SemanticServerDataProxy/endpoints/SelectGatewaysMsgService.wsdl'
+        client = Client(url)
+
+        reqList = client.factory.create('requests')
+        req = client.factory.create('request')
+
+        for sensor in self._sensors:
+            req = client.factory.create('request')
+            reqHead = client.factory.create('requestHead')
+            reqHead.requestType = reqType
+            reqHead.groupPeriod = str(self._time_scope).zfill(3)
+            reqHead.requestSubject = sensor
+            req.requestHead = reqHead
+            reqPeriod = client.factory.create('requestPeriod')
+            reqPeriod.fromTimeStamp = self._start_time
+            reqPeriod.toTimeStamp = self._end_time
+            req.requestPeriod = reqPeriod
+            reqList.request.append(req)
+
+        try:
+            result = client.service.SelectGatewayMessage(reqList, self._tenant, "evecity", "3v3C1ty.2486")
+            print client.last_sent().str()
+            for itemA in result.qeuryResultLines:
+                val = 0.0
+                for item in list(result.qeuryResultLines.queryResultLine):
+                    for item2 in list(item.qeuryResultField):
+                        if item2.columnName == 'timestamp' or item2.columnName =='period':
+                            period = item2.value
+                        elif item2.columnName == 'value' or item2.columnName == 'ProfileSignal' or item2.columnName == 'Sum':
+                            if item2.value != "n.a." and item2.value != "null":
+                                val = float(item2.value)
+
+                    if operation == ">":
+                        self._kpi_ordered_values.append(val)
+                    else:
+                        inVal = 0.0
+                        if period != "n.a." and period != "null":
+                            if period in self._kpi_values.keys():
+                                inVal = self._kpi_values[period]
+
+                            self._kpi_values[period] = self._get_val(inVal, operation, val)
+
+        except WebFault, e:
+            print client.last_sent()
+            print e
 
     @classmethod
     def _get_val(self, inp, oper, out):
@@ -296,17 +362,12 @@ class KpiHandlers:
     # Energy consumption
     def calculKpi1(self):
         self._getSensors("depc:eFlow", "Consumption")
-        for sensor in self._sensors:
-            self._getSensorsValues(sensor, "003", "+")
-            time.sleep(25)
-
+        self._getMultipleSensorsValues("003", "+")
         return self._kpi_values
 
     def calculKpi2(self):
         self._getSensors("depc:eFlow", "Production")
-        for sensor in self._sensors:
-            self._getSensorsValues(sensor, "003", "+")
-            time.sleep(25)
+        self._getMultipleSensorsValues("003", "+")
         return self._kpi_values
 
     def getCo2Factor(self):
@@ -318,6 +379,7 @@ class KpiHandlers:
     def calculKpi3(self):
         kpi1Dic = copy.deepcopy( self.calculKpi1() ) # consommation
         self._kpi_values.clear()
+        time.sleep(27)
         kpi2Dic = copy.deepcopy( self.calculKpi2() )  # production
         self._kpi_values.clear()
         for key, val in kpi1Dic.viewitems():
@@ -376,7 +438,7 @@ class KpiHandlers:
     def calculKpi9(self):
         kpi2Dic = copy.deepcopy( self.calculKpi2() ) # production
         self._kpi_values.clear()
-        time.sleep(20)
+        time.sleep(27)
         kpi7Dic = copy.deepcopy( self.calculKpi7() )  # surplus
         self._kpi_values.clear()
         for key, val in kpi2Dic.viewitems():
@@ -388,16 +450,17 @@ class KpiHandlers:
 
     def calculKpi10(self):
         self._getSensors("depc:eFlow", "Consumption")
-        for sensor in self._sensors:
-            self._getSensorsValues(sensor, "001", "+")
-
+        #for sensor in self._sensors:
+        #    self._getSensorsValues(sensor, "001", "+")
+        self._getMultipleSensorsValues("001", "+")
         kpi1Dic = copy.deepcopy( self._kpi_values )
         self._kpi_values.clear()
         time.sleep(25)
 
         self._getSensors("depc:eFlow", "Production")
-        for sensor in self._sensors:
-            self._getSensorsValues(sensor, "001", "+")
+        self._getMultipleSensorsValues("001", "+")
+        #for sensor in self._sensors:
+        #    self._getSensorsValues(sensor, "001", "+")
 
         cpt = 0
         for key, val in self._kpi_values.viewitems():
@@ -461,7 +524,7 @@ class KpiHandlers:
 
         kpi1Dic = copy.deepcopy( self.calculKpi1() ) # production
         self._kpi_values.clear()
-        time.sleep(25)
+        time.sleep(27)
         kpi2Dic = copy.deepcopy( self.calculKpi2() )  # surplus
         self._kpi_values.clear()
 

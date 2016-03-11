@@ -6,8 +6,25 @@ import httplib
 import operator
 import copy
 import time
+import datetime
+from collections import defaultdict
+from pip._vendor.html5lib.constants import spaceCharacters
 
-
+class FactoredMeter:
+    def __init__(self,signalid,factor):
+        self.signalid = signalid
+        self.factor = factor
+        self.values = dict()
+     
+    # alternative equals method to be able to compare based on content and not object id   
+    def __eq__(self, other):
+        return self.signalid == other.signalid and self.factor == other.factor
+        
+    def addValue(self, period, value):
+        if period not in self.values:
+            self.values.setdefault(period, float) 
+        self.values[period] = value  
+           
 class HTTPSClientAuthHandler(u2.HTTPSHandler):
     def __init__(self, key, cert):
         u2.HTTPSHandler.__init__(self)
@@ -42,8 +59,7 @@ class HTTPSClientCertTransport(HttpTransport):
         """
         tm = self.options.timeout
 
-        https_client_auth_handler = HTTPSClientAuthHandler(self.key,
-                                                           self.cert)
+        https_client_auth_handler = HTTPSClientAuthHandler(self.key,self.cert)
 
         # Add a proxy handler if the proxy settings is specified.
         # Otherwise, just use the HTTPSClientAuthHandler.
@@ -69,6 +85,14 @@ class KpiHandlers:
         self._kpi_values = {}
         self._kpi_ordered_values = []
         self._sensors = []
+        self._sensorsAccumulative = []
+        self._sensorsIncremental = []
+        self._sensorsInstant = []
+        self._VMsensors = []
+        self._VMs = {}
+        self._VMsAccumulative = []
+        self._VMsIncremental = []
+        self._VMsInstant = []
         self._occupancy = 0.0
         self._area = 0.0
         self._buyPrice = 0.0
@@ -76,8 +100,7 @@ class KpiHandlers:
         self._buyGasPrice = 0.0
 
     def getOccupancy(self):
-        if self._occupancy == 0.0:
-            self._getStaticDatas("006")
+        self._getStaticDatas("006")
         return self._occupancy
 
     def getArea(self):
@@ -86,7 +109,7 @@ class KpiHandlers:
         return self._area
 
     def getBuyPrice(self):
-        if (self._tenant == '0'):   #Roma
+        if (self._tenant == 0):   #Roma
             if self._buyPrice == 0.0:
                 self._getStaticDatas("009")
             return self._buyPrice
@@ -96,7 +119,7 @@ class KpiHandlers:
             return self._buyGasPrice
 
     def getSoldPrice(self):
-        if (self._tenant == '0'):   #Roma
+        if (self._tenant == 0):   #Roma
             if self._soldPrice == 0.0:
                 self._getStaticDatas("009")
             return self._soldPrice
@@ -129,9 +152,9 @@ class KpiHandlers:
 
                         # 1/4 low price * 3/4 high price (elec)
                         elif item2.columnName == 'electBuyHigh' and item2.value != "n.a." and item2.value != "null":
-                            self._buyPrice = self._buyPrice +(3 * self.float(item2.value))
+                            self._buyPrice = self._buyPrice +(3 * float(item2.value))
                         elif item2.columnName == 'electBuyLow' and item2.value != "n.a." and item2.value != "null":
-                            self._buyPrice = self._buyPrice + self.float(item2.value)
+                            self._buyPrice = self._buyPrice + float(item2.value)
                         elif item2.columnName == 'electSellLow' and item2.value != "n.a." and item2.value != "null":
                             self._soldPrice = self._soldPrice + float(item2.value)
                         elif item2.columnName == 'electSellHigh' and item2.value != "n.a." and item2.value != "null":
@@ -141,7 +164,7 @@ class KpiHandlers:
 
             self._buyPrice = self._buyPrice / 4.0
             self._soldPrice = self._soldPrice / 4.0
-
+            
         except WebFault, e:
             print client.last_sent()
             print e
@@ -183,8 +206,6 @@ class KpiHandlers:
         # client = Client(service_url, transport=transport)
         # print client
 
-        self._sensors = []
-
         url = "https://hamster.tno.nl/SemanticServerDataProxy/endpoints/SelectStaticGatewaysMsgService.wsdl"
         client = Client(url, location="https://hamster.tno.nl/SemanticServerDataProxy/endpoints")
 
@@ -202,25 +223,59 @@ class KpiHandlers:
 
         try:
             result = client.service.SelectStaticGatewayMessage(reqlist, self._tenant, "evecity", "3v3C1ty.2486")
+            #print client.last_sent().str()
             for itemA in result.qeuryResultLines:
                 for item in list(result.qeuryResultLines.queryResultLine):
                     useThisSensor = False
+                    isVirtual = False
                     for item2 in list(item.qeuryResultField):
+                        if item2.columnName == 'isVirtual' and item2.value == "true":
+                            isVirtual = True
+                        if item2.columnName == 'factoredSignalId':
+                            factoredSignalId = item2.value
+                        if item2.columnName == 'factor':
+                            factor = item2.value
+                        if item2.columnName == 'space':
+                            space = item2.value
                         if item2.columnName == 'signalid':
                             sensorid = item2.value
+                        if item2.columnName == 'measurementKind':
+                            measurementKind = item2.value                        
                         elif item2.columnName == 'energyLC': # and item2.value != "n.a." and item2.value != "null" and item2.value != "NotSpecified" and item2.value != "NotApplicable":
                             if filter == item2.value or filter == "None":
                                 useThisSensor = True
 
-                    if sensorid!= "n.a." and sensorid != "null" and useThisSensor == True:
-                        self._sensors.append(sensorid)
-
+                    if sensorid!= "n.a." and sensorid != "null" and useThisSensor == True and isVirtual == False:
+                        if sensorid not in self._sensors:
+                            self._sensors.append(sensorid)
+                        if measurementKind == 'Incremental' and sensorid not in self._sensorsIncremental:
+                            self._sensorsIncremental.append(sensorid)
+                        if measurementKind == 'Accumulative  ' and sensorid not in self._sensorsAccumulative:
+                            self._sensorsAccumulative.append(sensorid)
+                        if measurementKind == 'Instant  ' and sensorid not in self._sensorsInstant:
+                            self._sensorsInstant.append(sensorid)
+                    if sensorid!= "n.a." and sensorid != "null" and useThisSensor == True and isVirtual == True:
+                        factoredMeter = FactoredMeter(factoredSignalId, factor)
+                        self._sensors.append(factoredSignalId)
+                        self._VMsensors.append(factoredSignalId)
+                        if measurementKind == 'Incremental' and sensorid not in self._VMsIncremental:
+                            self._VMsIncremental.append(sensorid)
+                        if measurementKind == 'Accumulative  ' and sensorid not in self._VMsAccumulative:
+                            self._VMsAccumulative.append(sensorid)
+                        if measurementKind == 'Instant  ' and sensorid not in self._VMsInstant:
+                            self._VMsInstant.append(sensorid)                        
+                        if sensorid not in self._VMs:
+                            self._VMs.setdefault(sensorid, [])
+                        if factoredMeter not in self._VMs[sensorid]:
+                            self._VMs[sensorid].append(factoredMeter)
+                        
         except WebFault, e:
             print client.last_sent()
             print e
 
 
     def _getSensorsValues(self, sensor_id, reqType, operation):
+        
         """ get sensors values.
         Take into account scope, tenant, sensor_id (sensors list), start & end time,
         and time scope (group period) for this kpi :
@@ -262,6 +317,7 @@ class KpiHandlers:
 
         try:
             result = client.service.SelectGatewayMessage(reqList, self._tenant, "evecity", "3v3C1ty.2486")
+            #print client.last_sent().str()
             for itemA in result.qeuryResultLines:
                 val = 0.0
                 for item in list(result.qeuryResultLines.queryResultLine):
@@ -287,6 +343,7 @@ class KpiHandlers:
             print e
 
     def _getMultipleSensorsValues(self, reqType, operation):
+        
         """ get sensors values.
         Take into account scope, tenant, sensor_id (sensors list), start & end time,
         and time scope (group period) for this kpi :
@@ -309,26 +366,62 @@ class KpiHandlers:
         client = Client(url)
 
         reqList = client.factory.create('requests')
+    
+        # remove all factoremeter id's'
+        
+        for sensor in self._sensors:
+            req = client.factory.create('request')
+            reqHead = client.factory.create('requestHead')
+            reqHead.requestType = reqType
+            reqHead.groupPeriod = str(self._time_scope).zfill(3)
+            reqHead.requestSubject = sensor
+            req.requestHead = reqHead
+            reqPeriod = client.factory.create('requestPeriod')
+            reqPeriod.fromTimeStamp = self._start_time
+            reqPeriod.toTimeStamp = self._end_time
+            req.requestPeriod = reqPeriod
+            reqList.request.append(req)
+            
+            if (len(reqList.request) >= 10):
+                try:
+                    result = client.service.SelectGatewayMessage(reqList, self._tenant, "evecity", "3v3C1ty.2486")
+                    #print client.last_sent().str()
+                    for itemA in result.qeuryResultLines:
+                        val = 0.0
+                        for item in list(result.qeuryResultLines.queryResultLine):
+                            for item2 in list(item.qeuryResultField):
+                                if item2.columnName == 'timestamp' or item2.columnName =='period':
+                                    period = item2.value
+                                if item2.columnName == 'signalid' :
+                                    signalid = item2.value
+                                elif item2.columnName == 'value' or item2.columnName == 'Average' or item2.columnName == 'Sum':
+                                    if item2.value != "n.a." and item2.value != "null":
+                                        val = float(item2.value)
+                            if signalid in self._VMsensors:
+                                #print signalid
+                                for vm in self._VMs:
+                                    for factoredMeter in self._VMs[vm]:
+                                        if factoredMeter.signalid == signalid:
+                                            factoredMeter.addValue(period,val)
+                            else: 
+                                if operation == ">":
+                                    self._kpi_ordered_values.append(val)
+                                else:
+                                    inVal = 0.0
+                                    if period != "n.a." and period != "null":
+                                        if period in self._kpi_values.keys():
+                                            inVal = self._kpi_values[period]
+            
+                                        self._kpi_values[period] = self._get_val(inVal, operation, val)
+            
+     
+                except WebFault, e:
+                    print client.last_sent()
+                    print e
 
-        i = 0
-        if (len(self._sensors)) == 0:
-            return
-
-        while i < len(self._sensors):
-            reqList.request = []
-            for sensor in self._sensors[i:i+10]:
-                req = client.factory.create('request')
-                reqHead = client.factory.create('requestHead')
-                reqHead.requestType = reqType
-                reqHead.groupPeriod = str(self._time_scope).zfill(3)
-                reqHead.requestSubject = sensor
-                req.requestHead = reqHead
-                reqPeriod = client.factory.create('requestPeriod')
-                reqPeriod.fromTimeStamp = self._start_time
-                reqPeriod.toTimeStamp = self._end_time
-                req.requestPeriod = reqPeriod
-                reqList.request.append(req)
-
+                reqList.request = []
+                
+        if (len(reqList.request) > 0): 
             try:
                 result = client.service.SelectGatewayMessage(reqList, self._tenant, "evecity", "3v3C1ty.2486")
                 #print client.last_sent().str()
@@ -338,26 +431,50 @@ class KpiHandlers:
                         for item2 in list(item.qeuryResultField):
                             if item2.columnName == 'timestamp' or item2.columnName =='period':
                                 period = item2.value
-                            elif item2.columnName == 'value' or item2.columnName == 'ProfileSignal' or item2.columnName == 'Sum':
+                            if item2.columnName == 'signalid' :
+                                signalid = item2.value
+                            elif item2.columnName == 'value' or item2.columnName == 'Average' or item2.columnName == 'Sum':
                                 if item2.value != "n.a." and item2.value != "null":
                                     val = float(item2.value)
-
-                        if operation == ">":
-                            self._kpi_ordered_values.append(val)
-                        else:
-                            inVal = 0.0
-                            if period != "n.a." and period != "null":
-                                if period in self._kpi_values.keys():
-                                    inVal = self._kpi_values[period]
+                       
+                        if signalid in self._VMsensors:
+                            #print signalid# store
+                            for vm in self._VMs:
+                                for factoredMeter in self._VMs[vm]:
+                                    if factoredMeter.signalid == signalid:
+                                        factoredMeter.addValue(period,val)
+                        else:                         
+                            if operation == ">":
+                                self._kpi_ordered_values.append(val)
+                            else:
+                                inVal = 0.0
+                                if period != "n.a." and period != "null":
+                                    if period in self._kpi_values.keys():
+                                        inVal = self._kpi_values[period]
 
                                 self._kpi_values[period] = self._get_val(inVal, operation, val)
-                i += 10
-
+                                    
             except WebFault, e:
                 print client.last_sent()
                 print e
-                return
-
+                 
+        for vm in self._VMs:
+            vmValues = {}
+            for fm in self._VMs[vm]:
+                for period in fm.values:
+                    if period not in vmValues:
+                        vmValues.setdefault(period, float(0.0)) 
+                    vmValues[period] = self._get_val(vmValues[period],"+",(float(fm.factor) * fm.values[period]))    
+            for period in vmValues:
+                if operation == ">":
+                    self._kpi_ordered_values.append(val)
+                else:
+                    inVal = 0.0
+                    if period != "n.a." and period != "null":
+                        if period in self._kpi_values.keys():
+                            inVal = self._kpi_values[period]
+                    self._kpi_values[period] = self._get_val(inVal, operation, vmValues[period])
+                               
     @classmethod
     def _get_val(self, inp, oper, out):
         val = 0.0
@@ -369,16 +486,20 @@ class KpiHandlers:
     # Energy consumption
     def calculKpi1(self):
         self._getSensors("depc:eFlow", "Consumption")
+        #for sensor in self._sensors:
+        #    self._getSensorsValues(sensor, "003", "+")
         self._getMultipleSensorsValues("003", "+")
         return self._kpi_values
 
     def calculKpi2(self):
         self._getSensors("depc:eFlow", "Production")
+        #for sensor in self._sensors:
+        #    self._getSensorsValues(sensor, "003", "+")
         self._getMultipleSensorsValues("003", "+")
         return self._kpi_values
 
     def getCo2Factor(self):
-        if self._tenant == '0':
+        if self._tenant == 0:
             return 0.59     #http://www.econologie.com/europe-emissions-de-co2-par-pays-et-par-kwh-electrique-articles-3722.html
         else:
             return 0.225    #Gas
@@ -386,14 +507,11 @@ class KpiHandlers:
     def calculKpi3(self):
         kpi1Dic = copy.deepcopy( self.calculKpi1() ) # consommation
         self._kpi_values.clear()
-        time.sleep(27)
         kpi2Dic = copy.deepcopy( self.calculKpi2() )  # production
         self._kpi_values.clear()
         for key, val in kpi1Dic.viewitems():
-            if (val == 0):
+            if (val == 0) or (key not in kpi2Dic):
                 self._kpi_values[key] = 'n.a.n'
-            elif key not in kpi2Dic:
-                self._kpi_values[key] = 0
             else:
                 self._kpi_values[key] = kpi2Dic[key] / val
         return self._kpi_values
@@ -428,7 +546,6 @@ class KpiHandlers:
     def calculKpi7(self):
         kpi2Dic = copy.deepcopy( self.calculKpi2() )  # production
         self._kpi_values.clear()
-        time.sleep(27)
         kpi1Dic = copy.deepcopy(self.calculKpi1())
         for key, val in kpi2Dic.viewitems():
             self._kpi_values[key] = abs(val - kpi1Dic.get(key, 0))
@@ -447,11 +564,10 @@ class KpiHandlers:
     def calculKpi9(self):
         kpi2Dic = copy.deepcopy( self.calculKpi2() ) # production
         self._kpi_values.clear()
-        time.sleep(27)
         kpi7Dic = copy.deepcopy( self.calculKpi7() )  # surplus
         self._kpi_values.clear()
-        for key, val in kpi7Dic.viewitems():
-            if kpi2Dic.get(key, 0) == 0:
+        for key, val in kpi2Dic.viewitems():
+            if (val == 0) or (key not in kpi7Dic):
                 self._kpi_values[key] = 'n.a.n'
             else:
                 self._kpi_values[key] = kpi7Dic[key] / val
@@ -459,17 +575,15 @@ class KpiHandlers:
 
     def calculKpi10(self):
         self._getSensors("depc:eFlow", "Consumption")
-        #for sensor in self._sensors:
-        #    self._getSensorsValues(sensor, "001", "+")
-        self._getMultipleSensorsValues("001", "+")
+        for sensor in self._sensors:
+            self._getSensorsValues(sensor, "001", "+")
+
         kpi1Dic = copy.deepcopy( self._kpi_values )
         self._kpi_values.clear()
-        time.sleep(25)
 
         self._getSensors("depc:eFlow", "Production")
-        self._getMultipleSensorsValues("001", "+")
-        #for sensor in self._sensors:
-        #    self._getSensorsValues(sensor, "001", "+")
+        for sensor in self._sensors:
+            self._getSensorsValues(sensor, "001", "+")
 
         cpt = 0
         for key, val in self._kpi_values.viewitems():
@@ -496,8 +610,6 @@ class KpiHandlers:
             self._kpi_values = dict.fromkeys( self._kpi_values.iterkeys(), 'n.a.n' )
         else:
             self._kpi_values.update((k,v/(area)) for k,v in self._kpi_values.items())
-
-        return self._kpi_values
 
 
     def calculKpi13(self):
@@ -535,7 +647,6 @@ class KpiHandlers:
 
         kpi1Dic = copy.deepcopy( self.calculKpi1() ) # production
         self._kpi_values.clear()
-        time.sleep(27)
         kpi2Dic = copy.deepcopy( self.calculKpi2() )  # surplus
         self._kpi_values.clear()
 

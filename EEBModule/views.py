@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view
 
 from EEBModule.serializers import kpiSerializer
 from EEBModule.models import Kpi
-from KpiCalculation import *
+from EEBModule.KpiCalculation import *
 
 
 @api_view(['GET'])
@@ -26,9 +26,9 @@ def kpiList(request):
         else:
             return Response({'parameters errors' : 'kpi_scope only acceptable values are 0 or 1'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if tenant == '1': #Manchester
+        if tenant == '1' or self._tenant == '99': #Manchester
             kwargs ['kpi_tenant_Manchester'] = True
-        elif tenant == '0': #Roma
+        elif tenant == '0' or self._tenant == '98': #Roma
              kwargs ['kpi_tenant_Roma'] = True
         else:
             return Response({'parameters errors' : 'kpi_tenant only acceptable values are 1 for Manchester or 0 for Roma'}, status=status.HTTP_400_BAD_REQUEST)

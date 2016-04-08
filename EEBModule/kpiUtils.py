@@ -109,7 +109,7 @@ class KpiHandlers:
         return self._area
 
     def getBuyPrice(self):
-        if (self._tenant == 0):   #Roma
+        if (self._tenant == 0 or self._tenant == 98):   #Roma
             if self._buyPrice == 0.0:
                 self._getStaticDatas("009")
             return self._buyPrice
@@ -119,7 +119,7 @@ class KpiHandlers:
             return self._buyGasPrice
 
     def getSoldPrice(self):
-        if (self._tenant == 0):   #Roma
+        if (self._tenant == 0 or self._tenant == 98):   #Roma
             if self._soldPrice == 0.0:
                 self._getStaticDatas("009")
             return self._soldPrice
@@ -223,7 +223,7 @@ class KpiHandlers:
 
         try:
             result = client.service.SelectStaticGatewayMessage(reqlist, self._tenant, "evecity", "3v3C1ty.2486")
-            #print client.last_sent().str()
+            print client.last_sent().str()
             for itemA in result.qeuryResultLines:
                 for item in list(result.qeuryResultLines.queryResultLine):
                     useThisSensor = False
@@ -317,7 +317,7 @@ class KpiHandlers:
 
         try:
             result = client.service.SelectGatewayMessage(reqList, self._tenant, "evecity", "3v3C1ty.2486")
-            #print client.last_sent().str()
+            print client.last_sent().str()
             for itemA in result.qeuryResultLines:
                 val = 0.0
                 for item in list(result.qeuryResultLines.queryResultLine):
@@ -385,7 +385,7 @@ class KpiHandlers:
             if (len(reqList.request) >= 10):
                 try:
                     result = client.service.SelectGatewayMessage(reqList, self._tenant, "evecity", "3v3C1ty.2486")
-                    #print client.last_sent().str()
+                    print client.last_sent().str()
                     for itemA in result.qeuryResultLines:
                         val = 0.0
                         for item in list(result.qeuryResultLines.queryResultLine):
@@ -499,7 +499,7 @@ class KpiHandlers:
         return self._kpi_values
 
     def getCo2Factor(self):
-        if self._tenant == 0:
+        if (self._tenant == 0 or self._tenant == 98):
             return 0.59     #http://www.econologie.com/europe-emissions-de-co2-par-pays-et-par-kwh-electrique-articles-3722.html
         else:
             return 0.225    #Gas
@@ -548,7 +548,17 @@ class KpiHandlers:
         self._kpi_values.clear()
         kpi1Dic = copy.deepcopy(self.calculKpi1())
         for key, val in kpi2Dic.viewitems():
-            self._kpi_values[key] = abs(val - kpi1Dic.get(key, 0))
+            if (key not in kpi1Dic):
+                kpi1val = 0 ; # if not exists use 0 
+            else:
+                kpi1val  = kpi1Dic.get(key, 0)
+            self._kpi_values[key] = val - kpi1val
+        for key, val in kpi1Dic.viewitems():  # second loop to fill gaps in kpi2 key list
+            if (key not in kpi2Dic):
+                kpi2val = 0 ; # if not exists use 0 
+            else:
+                kpi2val  = kpi2Dic.get(key, 0)
+            self._kpi_values[key] = kpi2val - val
         return self._kpi_values
 
 
